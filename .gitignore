@@ -1,0 +1,16 @@
+# Ignorar executáveis  
+*.exe  
+*.dll  
+*.so  
+*.out  
+
+# Ignorar logs e arquivos temporários  
+*.log  
+*.txt  
+
+# Ignorar pasta binária  
+/bin/  
+
+# Ignorar configurações do IDE  
+.vscode/  
+.idea/  
