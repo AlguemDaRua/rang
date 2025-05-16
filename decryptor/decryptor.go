@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -13,99 +16,128 @@ import (
 )
 
 const (
-	password  = "123"
-	targetDir = `C:\teste`
+	targetDir        = `C:\teste`
+	defaultWallpaper = `C:\Windows\Web\Wallpaper\Windows\img0.jpg`
+	startupKeyName   = "RansomDemo"
 )
 
-func xorEncrypt(data []byte) []byte {
-	encrypted := make([]byte, len(data))
-	for i := range data {
-		encrypted[i] = data[i] ^ password[i%len(password)]
+var (
+	user32           = windows.NewLazySystemDLL("user32.dll")
+	systemParameters = user32.NewProc("SystemParametersInfoW")
+)
+
+func decryptAES(data []byte, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
 	}
-	return encrypted
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(data) < gcm.NonceSize() {
+		return nil, errors.New("dados criptografados inválidos")
+	}
+
+	nonce, ciphertext := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, ciphertext, nil)
 }
 
-func restoreDefaultWallpaper() {
-	defaultWallpaper := `C:\Windows\Web\Wallpaper\Windows\img0.jpg` // Wallpaper padrão do Windows 11
-	user32 := windows.NewLazySystemDLL("user32.dll")
-	systemParameters := user32.NewProc("SystemParametersInfoW")
-
+func restoreWallpaper() {
 	pathUTF16, _ := windows.UTF16PtrFromString(defaultWallpaper)
 	systemParameters.Call(
 		uintptr(0x0014), // SPI_SETDESKWALLPAPER
 		0,
 		uintptr(unsafe.Pointer(pathUTF16)),
-		uintptr(0x01|0x02), // SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+		uintptr(0x01|0x02),
 	)
 }
 
-func removeFromStartup() {
+func removeFromStartup() error {
 	key, err := registry.OpenKey(
 		registry.CURRENT_USER,
 		`Software\Microsoft\Windows\CurrentVersion\Run`,
 		registry.SET_VALUE,
 	)
 	if err != nil {
-		return
+		return fmt.Errorf("erro ao abrir registro: %v", err)
 	}
 	defer key.Close()
-	key.DeleteValue("RansomDemo")
+
+	if err := key.DeleteValue(startupKeyName); err != nil {
+		return fmt.Errorf("erro ao remover da inicialização: %v", err)
+	}
+	return nil
 }
 
-func main() {
-	fmt.Print("\033[36m")
-	fmt.Println("[?] Insira a chave de descriptografia:")
-	fmt.Print("\033[0m")
-
-	var inputKey string
-	fmt.Scanln(&inputKey)
-
-	if inputKey != password {
-		fmt.Print("\033[31m")
-		fmt.Println("⚠️ CHAVE INVÁLIDA! SEUS ARQUIVOS SERÃO DELETADOS!")
-		fmt.Print("\033[0m")
-		time.Sleep(10 * time.Second)
-		return
-	}
-
-	// Remover persistência
-	removeFromStartup()
-
-	// Restaurar wallpaper original
-	restoreDefaultWallpaper()
-
-	// Remover arquivo de aviso
-	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
-
-	// Descriptografar arquivos recursivamente (pastas e subpastas)
-	filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
+func decryptFiles(key []byte) error {
+	return filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".aeehh") {
 			return nil
 		}
 
-		// Ler arquivo criptografado
 		data, err := os.ReadFile(path)
 		if err != nil {
+			log.Printf("[!] Erro ao ler %s: %v", path, err)
 			return nil
 		}
 
-		// Descriptografar
-		decryptedData := xorEncrypt(data)
-		originalName := strings.TrimPrefix(strings.TrimSuffix(info.Name(), ".aeehh"), "[RANSOM]")
+		decryptedData, err := decryptAES(data, key)
+		if err != nil {
+			log.Printf("[!] Erro ao descriptografar %s: %v", path, err)
+			return nil
+		}
+
+		originalName := strings.TrimPrefix(
+			strings.TrimSuffix(info.Name(), ".aeehh"),
+			"[RANSOM]",
+		)
 		originalPath := filepath.Join(filepath.Dir(path), originalName)
 
-		// Escrever arquivo original
 		if err := os.WriteFile(originalPath, decryptedData, 0644); err != nil {
+			log.Printf("[!] Erro ao escrever %s: %v", originalPath, err)
 			return nil
 		}
 
-		// Remover arquivo criptografado
-		os.Remove(path)
+		if err := os.Remove(path); err != nil {
+			log.Printf("[!] Erro ao remover criptografado %s: %v", path, err)
+		}
 
+		log.Printf("[+] Descriptografado: %s -> %s", path, originalPath)
 		return nil
 	})
+}
 
-	fmt.Print("\033[32m")
-	fmt.Println("[+] Sistema restaurado com sucesso!")
-	fmt.Print("\033[0m")
+func main() {
+	log.SetFlags(log.Ltime | log.Lshortfile)
+	log.Println("[*] Iniciando descriptografia...")
+
+	// Opção 1: Ler chave do arquivo (copiado do Fedora)
+	key, err := os.ReadFile("stolen_key.bin")
+	if err != nil {
+		log.Fatal("[!] Erro ao ler chave: ", err)
+	}
+
+	// Opção 2: Inserir manualmente (para testes)
+	// fmt.Print("Insira a chave (hex): ")
+	// var inputKeyHex string
+	// fmt.Scanln(&inputKeyHex)
+	// key, _ := hex.DecodeString(inputKeyHex)
+
+	// Restaurar sistema
+	if err := removeFromStartup(); err != nil {
+		log.Println("[!] Aviso: ", err)
+	}
+
+	restoreWallpaper()
+	os.Remove(filepath.Join(targetDir, "!!!WARNING!!!.txt"))
+
+	// Descriptografar arquivos
+	if err := decryptFiles(key); err != nil {
+		log.Fatal("[!] ERRO na descriptografia: ", err)
+	}
+
+	log.Println("[+] Sistema restaurado com sucesso!")
 }
